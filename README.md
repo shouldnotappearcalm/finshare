@@ -28,12 +28,18 @@ from finshare import get_data_manager
 manager = get_data_manager()
 
 # 获取 K线数据（只需传入股票代码，无需市场后缀）
-data = manager.get_kline('000001', start='2024-01-01', end='2024-01-31')
+data = manager.get_historical_data(
+    code='000001',
+    start='2024-01-01',
+    end='2024-01-31',
+    adjust='qfq'  # 前复权
+)
 print(data.head())
 
 # 获取实时快照
-snapshot = manager.get_snapshot('000001')
+snapshot = manager.get_snapshot_data('000001')
 print(f"最新价: {snapshot.last_price}")
+print(f"涨跌幅: {(snapshot.last_price - snapshot.prev_close) / snapshot.prev_close * 100:.2f}%")
 ```
 
 ## ✨ 核心特性
@@ -73,35 +79,71 @@ from finshare import get_data_manager
 ### 基础用法
 
 ```python
-from finshare import get_data_manager
+from finshare import get_data_manager, logger
 
 manager = get_data_manager()
 
 # 获取日线数据（只需传入6位股票代码）
-data = manager.get_kline(
+data = manager.get_historical_data(
     code='000001',  # 平安银行
     start='2024-01-01',
     end='2024-01-31',
     adjust='qfq'  # 前复权
 )
 
+if data is not None and len(data) > 0:
+    logger.info(f"成功获取 {len(data)} 条数据")
+    logger.info(f"开盘价: {data['open_price'].iloc[0]:.2f}")
+    logger.info(f"收盘价: {data['close_price'].iloc[-1]:.2f}")
+    logger.info(f"最高价: {data['high_price'].max():.2f}")
+    logger.info(f"最低价: {data['low_price'].min():.2f}")
+
 # 获取实时快照
-snapshot = manager.get_snapshot('000001')
+snapshot = manager.get_snapshot_data('000001')
+if snapshot:
+    logger.info(f"股票代码: {snapshot.code}")
+    logger.info(f"最新价格: {snapshot.last_price}")
+    logger.info(f"成交量: {snapshot.volume}")
+    logger.info(f"成交额: {snapshot.amount}")
+    if snapshot.prev_close:
+        change_percent = (snapshot.last_price - snapshot.prev_close) / snapshot.prev_close * 100
+        logger.info(f"涨跌幅: {change_percent:.2f}%")
 ```
 
 ### 批量获取
 
 ```python
-from finshare import get_data_manager
+from finshare import get_data_manager, logger
 
 manager = get_data_manager()
 
 # 批量获取多只股票（使用6位代码）
-codes = ['000001', '000002', '600000']
-data_dict = manager.batch_get_kline(codes, start='2024-01-01')
+symbols = ['000001', '000002', '600000', '600036']
 
-for code, data in data_dict.items():
-    print(f"{code}: {len(data)} 条数据")
+results = {}
+for symbol in symbols:
+    try:
+        logger.info(f"正在获取 {symbol}...")
+        data = manager.get_historical_data(
+            code=symbol,
+            start='2024-01-01',
+            end='2024-01-31'
+        )
+
+        if data is not None and len(data) > 0:
+            results[symbol] = data
+            logger.info(f"✓ {symbol}: {len(data)} 条数据")
+        else:
+            logger.warning(f"✗ {symbol}: 未获取到数据")
+    except Exception as e:
+        logger.error(f"✗ {symbol}: {e}")
+
+# 数据分析示例
+if results:
+    logger.info("\n数据分析:")
+    for symbol, data in results.items():
+        change = (data['close_price'].iloc[-1] - data['close_price'].iloc[0]) / data['close_price'].iloc[0] * 100
+        logger.info(f"  {symbol}: 涨跌幅 {change:+.2f}%")
 ```
 
 ### 使用特定数据源
@@ -111,11 +153,11 @@ from finshare import EastMoneyDataSource, TencentDataSource
 
 # 使用东方财富
 eastmoney = EastMoneyDataSource()
-data = eastmoney.get_kline('000001', start='2024-01-01')
+data = eastmoney.get_historical_data('000001', start='2024-01-01')
 
 # 使用腾讯财经
 tencent = TencentDataSource()
-data = tencent.get_kline('000001', start='2024-01-01')
+data = tencent.get_historical_data('000001', start='2024-01-01')
 ```
 
 ## 🌟 为什么选择 finshare？
