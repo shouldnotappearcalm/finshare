@@ -52,10 +52,66 @@ print(f"涨跌幅: {(snapshot.last_price - snapshot.prev_close) / snapshot.prev_
 - 🔧 **简单易用** - 简洁的 API 设计，开箱即用
 - 🤖 **AI 驱动开发** - 完全由 Claude AI 实现，代码质量有保障
 
+## 🔌 MCP Server
+
+`finshare` 现已支持作为标准的 **Model Context Protocol (MCP)** 服务器运行，这允许 AI 助手（例如 Claude 或者集成了 MCP 客户端的智能体）直接调用 `finshare` 的金融数据获取能力。
+
+### 配置指南 (Claude Desktop)
+
+配置文件路径：
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+将以下内容添加到 `mcpServers` 中：
+
+#### 方案一：使用 uv run (本地开发/源码运行)
+
+如果你已将项目克隆到本地，建议使用此方式。请将代码中的路径替换为你本地的实际路径：
+
+```json
+{
+  "mcpServers": {
+    "finshare": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/your/finshare",
+        "--python",
+        "3.12",
+        "finshare/mcp_server.py"
+      ]
+    }
+  }
+}
+```
+
+*注意：请将 `/path/to/your/finshare` 替换为你本地项目的实际绝对路径。*
+
+#### 方案二：使用 uvx (快速运行)
+
+适合直接使用已安装的包：
+
+```json
+{
+  "mcpServers": {
+    "finshare_data_provider": {
+      "command": "uvx",
+      "args": [
+        "--with", "finshare",
+        "--with", "mcp",
+        "python",
+        "-m", "finshare.mcp_server"
+      ]
+    }
+  }
+}
+```
+
 ## 📦 安装
 
 ```bash
-pip install finshare
+pip install finshare mcp
 ```
 
 **注意**: 包名为 `finshare`，但导入时使用 `finshare`：

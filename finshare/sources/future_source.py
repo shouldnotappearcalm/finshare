@@ -194,11 +194,12 @@ class FutureDataSource(BaseDataSource):
         try:
             # 解析期货代码
             future_code, contract_month = self._parse_future_code(code)
+            symbol = f"{future_code}{contract_month if contract_month else '0'}"
 
             # 新浪期货实时API
-            url = f"{self.sina_base_url}/list=nf_{future_code}{contract_month}"
+            url = f"{self.sina_base_url}/list=nf_{symbol}"
 
-            response_data = self._make_request(url)
+            response_data = self._make_request(url, headers=self.sina_headers)
 
             if not response_data:
                 return None
@@ -378,44 +379,105 @@ class FutureDataSource(BaseDataSource):
         格式: var nf_IF2409="日期,开盘,最高,最低,最新,成交量,持仓量,...";
         """
         try:
-            # 查找数据
-            pattern = r'var nf_[A-Z]+\d+="(.*?)"'
-            match = re.search(pattern, content)
+            future_code, contract_month = self._parse_future_code(code)
+            symbol = f"{future_code}{contract_month if contract_month else '0'}"
+            patterns = [
+                rf'var hq_str_nf_{re.escape(symbol)}="(.*?)";',
+                rf'var nf_{re.escape(symbol)}="(.*?)";',
+            ]
+
+            match = None
+            for pattern in patterns:
+                match = re.search(pattern, content, re.I | re.S)
+                if match:
+                    break
 
             if not match:
                 return None
 
             data_str = match.group(1)
-            parts = data_str.split(",")
-
-            if len(parts) < 7:
+            if not data_str:
                 return None
 
-            # 解析数据
-            # 0: 日期时间, 1: 开盘, 2: 最高, 3: 最低, 4: 最新, 5: 成交量, 6: 持仓量
-            # 7: 买入价, 8: 卖出价, 9: 昨收, 10: 今开, 11: 最高, 12: 最低
-            last_price = float(parts[4]) if parts[4] else 0
-            volume = float(parts[5]) if parts[5] else 0
-            open_interest = float(parts[6]) if parts[6] else 0
-            bid_price = float(parts[7]) if len(parts) > 7 and parts[7] else 0
-            ask_price = float(parts[8]) if len(parts) > 8 and parts[8] else 0
-            prev_close = float(parts[9]) if len(parts) > 9 and parts[9] else 0
-            day_open = float(parts[10]) if len(parts) > 10 and parts[10] else 0
-            day_high = float(parts[11]) if len(parts) > 11 and parts[11] else 0
-            day_low = float(parts[12]) if len(parts) > 12 and parts[12] else 0
+            parts = data_str.split(",")
 
-            # 成交额
-            amount = volume * last_price if last_price > 0 else 0
+            if len(parts) < 10:
+                return None
+
+            def safe_float(index: int) -> float:
+                if index >= len(parts):
+                    return 0.0
+                value = parts[index].strip()
+                if not value:
+                    return 0.0
+                try:
+                    return float(value)
+                except ValueError:
+                    return 0.0
+
+            def safe_int_date_time(date_idx: int, time_idx: Optional[int] = None) -> datetime:
+                try:
+                    date_part = parts[date_idx].strip()
+                    if time_idx is not None and time_idx < len(parts):
+                        time_part = parts[time_idx].strip()
+                        if date_part and time_part:
+                            return datetime.strptime(f"{date_part} {time_part}", "%Y-%m-%d %H:%M:%S")
+                    if date_part:
+                        return datetime.strptime(date_part, "%Y-%m-%d")
+                except (ValueError, IndexError):
+                    pass
+                return datetime.now()
+
+            numeric_first = False
+            try:
+                float(parts[0].strip())
+                numeric_first = True
+            except ValueError:
+                numeric_first = False
+
+            if numeric_first:
+                day_open = safe_float(0)
+                day_high = safe_float(1)
+                day_low = safe_float(2)
+                last_price = safe_float(3)
+                volume = safe_float(4)
+                amount = safe_float(5)
+                open_interest = safe_float(6)
+                bid_price = safe_float(7)
+                ask_price = safe_float(8)
+                bid_volume = safe_float(11)
+                ask_volume = safe_float(12)
+                prev_close = safe_float(14)
+                timestamp = safe_int_date_time(37, 38)
+            else:
+                day_open = safe_float(2)
+                day_high = safe_float(3)
+                day_low = safe_float(4)
+                last_price = safe_float(8)
+                volume = safe_float(14)
+                amount = safe_float(5) if safe_float(5) > 0 else volume * last_price
+                open_interest = safe_float(13)
+                bid_price = safe_float(6)
+                ask_price = safe_float(7)
+                bid_volume = safe_float(11)
+                ask_volume = safe_float(12)
+                prev_close = safe_float(10)
+                timestamp = safe_int_date_time(17)
+
+            if last_price <= 0:
+                return None
 
             snapshot = FutureSnapshotData(
                 code=code,
-                timestamp=datetime.now(),
+                timestamp=timestamp,
                 last_price=last_price,
                 volume=volume,
                 open_interest=open_interest,
                 amount=amount,
                 bid1_price=bid_price,
                 ask1_price=ask_price,
+                bid1_volume=bid_volume,
+                ask1_volume=ask_volume,
                 day_high=day_high,
                 day_low=day_low,
                 day_open=day_open,

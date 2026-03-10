@@ -214,7 +214,7 @@ class FeatureClient:
             "invt": 2,
             "fid": "f62",  # 主力净流入
             "fs": "m:90+t:2",
-            "fields": "f2,f3,f12,f13,f14,f62",  # f62=主力净流入
+            "fields": "f2,f3,f12,f13,f14,f62,f184",
         }
 
         data = self._make_request(url, params)
@@ -230,7 +230,7 @@ class FeatureClient:
                 record = {
                     "industry": item.get("f14", ""),
                     "net_inflow": item.get("f62", 0),  # 主力净流入
-                    "net_inflow_ratio": 0,
+                    "net_inflow_ratio": item.get("f184", 0),
                     "change_rate": item.get("f3", 0),
                 }
                 records.append(record)

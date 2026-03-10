@@ -9,6 +9,7 @@
 """
 
 import json
+import re
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Dict
 
@@ -96,10 +97,11 @@ class FundDataSource(BaseDataSource):
         try:
             fund_code = self._format_fund_code(code)
 
-            # 东方财富基金信息API
-            url = f"{self.eastmoney_base_url}/jjj/{fund_code}.html"
+            # 天天基金详情页已失效，改用 pingzhongdata JS 解析基础信息
+            url = f"{self.eastmoney_base_url}/pingzhongdata/{fund_code}.js"
+            params = {"v": datetime.now().strftime("%Y%m%d%H%M%S")}
 
-            response_data = self._make_request(url)
+            response_data = self._make_request(url, params)
 
             if not response_data:
                 return None
@@ -260,21 +262,105 @@ class FundDataSource(BaseDataSource):
         try:
             info = {"code": code}
 
-            # 提取基金规模
-            scale_pattern = 'fundScale":'
-            if scale_pattern in response_data:
-                start = response_data.find(scale_pattern) + len(scale_pattern)
-                end = response_data.find(",", start)
-                scale_str = response_data[start:end].strip().strip('"')
-                info["scale"] = scale_str
+            def extract_var(name: str) -> Optional[str]:
+                pattern = rf"var\s+{re.escape(name)}\s*=\s*(.*?);"
+                match = re.search(pattern, response_data, re.S)
+                if not match:
+                    return None
+                return match.group(1).strip()
 
-            # 提取基金经理
-            manager_pattern = 'fundManager":'
-            if manager_pattern in response_data:
-                start = response_data.find(manager_pattern) + len(manager_pattern)
-                end = response_data.find(",", start)
-                manager = response_data[start:end].strip().strip('"')
-                info["manager"] = manager
+            def extract_string_var(name: str) -> Optional[str]:
+                raw_value = extract_var(name)
+                if not raw_value:
+                    return None
+                if raw_value.startswith('"') and raw_value.endswith('"'):
+                    return raw_value[1:-1]
+                return raw_value.strip('"')
+
+            def extract_json_var(name: str):
+                raw_value = extract_var(name)
+                if not raw_value:
+                    return None
+                if not raw_value.startswith(("{", "[")):
+                    return None
+                return json.loads(raw_value)
+
+            name = extract_string_var("fS_name")
+            if name:
+                info["name"] = name
+
+            source_rate = extract_string_var("fund_sourceRate")
+            if source_rate:
+                info["source_rate"] = source_rate
+
+            current_rate = extract_string_var("fund_Rate")
+            if current_rate:
+                info["current_rate"] = current_rate
+
+            min_subscription = extract_string_var("fund_minsg")
+            if min_subscription:
+                info["min_subscription"] = min_subscription
+
+            return_1y = extract_string_var("syl_1n")
+            if return_1y:
+                info["return_1y"] = return_1y
+
+            return_6m = extract_string_var("syl_6y")
+            if return_6m:
+                info["return_6m"] = return_6m
+
+            return_3m = extract_string_var("syl_3y")
+            if return_3m:
+                info["return_3m"] = return_3m
+
+            return_1m = extract_string_var("syl_1y")
+            if return_1m:
+                info["return_1m"] = return_1m
+
+            managers = extract_json_var("Data_currentFundManager")
+            if isinstance(managers, list) and managers:
+                parsed_managers = []
+                for manager in managers:
+                    if not isinstance(manager, dict):
+                        continue
+                    parsed_manager = {
+                        "name": manager.get("name", ""),
+                        "work_time": manager.get("workTime", ""),
+                        "fund_size": manager.get("fundSize", ""),
+                        "star": manager.get("star", 0),
+                    }
+                    parsed_managers.append(parsed_manager)
+
+                if parsed_managers:
+                    info["manager"] = parsed_managers[0]["name"]
+                    info["managers"] = parsed_managers
+
+            fluctuation_scale = extract_json_var("Data_fluctuationScale")
+            if isinstance(fluctuation_scale, dict):
+                categories = fluctuation_scale.get("categories", [])
+                series = fluctuation_scale.get("series", [])
+                if categories and series:
+                    latest_series = series[-1]
+                    if isinstance(latest_series, dict):
+                        info["scale_report_date"] = categories[-1]
+                        info["scale"] = latest_series.get("y", 0)
+                        info["scale_change_mom"] = latest_series.get("mom", "")
+
+            asset_allocation = extract_json_var("Data_assetAllocation")
+            if isinstance(asset_allocation, dict):
+                allocation = {}
+                for series_item in asset_allocation.get("series", []):
+                    if not isinstance(series_item, dict):
+                        continue
+                    data = series_item.get("data", [])
+                    if not data:
+                        continue
+                    allocation[series_item.get("name", "")] = data[-1]
+                if allocation:
+                    info["asset_allocation"] = allocation
+
+            if len(info) == 1:
+                return None
 
             return info
 

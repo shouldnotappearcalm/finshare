@@ -27,6 +27,20 @@ class EastMoneyDataSource(BaseDataSource):
             "Origin": "https://quote.eastmoney.com",
         }
 
+    @staticmethod
+    def _is_trading_session(now: Optional[datetime] = None) -> bool:
+        """根据本地时间粗略判断当前是否处于A股交易时段"""
+        current = now or datetime.now()
+        if current.weekday() >= 5:
+            return False
+
+        minutes = current.hour * 60 + current.minute
+        morning_open = 9 * 60 + 30
+        morning_close = 11 * 60 + 30
+        afternoon_open = 13 * 60
+        afternoon_close = 15 * 60
+        return morning_open <= minutes <= morning_close or afternoon_open <= minutes <= afternoon_close
+
     def get_historical_data(
         self,
         code: str,
@@ -188,6 +202,8 @@ class EastMoneyDataSource(BaseDataSource):
             # ETF/LOF/基金的价格单位是厘（/1000），股票是分（/100）
             price_divisor = self._get_price_divisor(full_code)
 
+            now = datetime.now()
+
             # 解析字段
             current_price = data.get("f43", 0) / price_divisor
             pre_close = data.get("f60", 0) / price_divisor
@@ -196,25 +212,15 @@ class EastMoneyDataSource(BaseDataSource):
             low_price = data.get("f45", 0) / price_divisor
             volume = data.get("f47", 0)  # 成交量（手）
             amount = data.get("f48", 0)  # 成交额
-            bid_price = data.get("f9", 0) / price_divisor
-            ask_price = data.get("f10", 0) / price_divisor
-            bid_volume = data.get("f13", 0)  # 买一量
-            ask_volume = data.get("f12", 0)  # 卖一量
 
-            # 获取时间戳
-            update_time = data.get("f168", "")
-            if update_time:
-                try:
-                    # 格式: "2023-12-01 15:00:00"
-                    timestamp = datetime.strptime(update_time, "%Y-%m-%d %H:%M:%S")
-                except:
-                    timestamp = datetime.now()
-            else:
-                timestamp = datetime.now()
+            # 单证券接口的盘口字段频繁变更，缺少稳定映射时宁可返回空值
+            bid_price = None
+            ask_price = None
+            bid_volume = None
+            ask_volume = None
 
-            # 市场状态
-            market_status = data.get("f84", 0)
-            is_trading = market_status == 1
+            timestamp = now
+            is_trading = self._is_trading_session(now)
 
             snapshot = SnapshotData(
                 code=full_code,
@@ -329,21 +335,13 @@ class EastMoneyDataSource(BaseDataSource):
             volume = item.get("f5", 0)  # 成交量（手）
             amount = item.get("f6", 0)  # 成交额
 
-            # 买一卖一数据
-            bid_price = item.get("f9", 0)
-            ask_price = item.get("f10", 0)
-            bid_volume = item.get("f13", 0)
-            ask_volume = item.get("f12", 0)
+            # 批量列表接口不稳定提供盘口字段，避免把代码等字段误映射成买卖盘
+            bid_price = None
+            ask_price = None
+            bid_volume = None
+            ask_volume = None
 
-            # 时间戳
-            update_time = item.get("f168", "")
-            if update_time:
-                try:
-                    timestamp = datetime.strptime(update_time, "%Y-%m-%d %H:%M:%S")
-                except:
-                    timestamp = datetime.now()
-            else:
-                timestamp = datetime.now()
+            timestamp = datetime.now()
 
             snapshot = SnapshotData(
                 code=full_code,
@@ -359,7 +357,7 @@ class EastMoneyDataSource(BaseDataSource):
                 day_low=low_price,
                 day_open=open_price,
                 prev_close=pre_close,
-                is_trading=current_price > 0,
+                is_trading=self._is_trading_session(timestamp),
                 market=self._get_market_type(full_code),
                 data_source=self.source_name,
             )
@@ -691,11 +689,11 @@ class EastMoneyDataSource(BaseDataSource):
 
             # 确定市场参数
             if market == "sh":
-                fs_param = "m:1+t:23,m:1+t:80"  # 上海主板
+                fs_param = "m:1+t:2,m:1+t:23,m:1+t:80"
             elif market == "sz":
-                fs_param = "m:0+t:6,m:0+t:80"  # 深圳主板
+                fs_param = "m:0+t:6,m:0+t:80"
             else:
-                fs_param = "m:0+t:6,m:0+t:80,m:1+t:23,m:1+t:80"  # 全部
+                fs_param = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:1+t:80"
 
             # 获取所有数据（分页获取）
             all_stocks = []
@@ -706,12 +704,12 @@ class EastMoneyDataSource(BaseDataSource):
                 params = {
                     "pn": page,
                     "pz": page_size,
-                    "po": 1,
+                    "po": 0,
                     "np": 1,
                     "ut": "bd1d9ddb04089700cf9c27f6f7426281",
                     "fltt": 2,
                     "invt": 2,
-                    "fid": "f3",
+                    "fid": "f12",
                     "fs": fs_param,
                     "fields": "f1,f2,f3,f4,f5,f6,f7,f12,f13,f14,f15,f16,f17,f18",
                 }
@@ -726,14 +724,14 @@ class EastMoneyDataSource(BaseDataSource):
                     break
 
                 all_stocks.extend(stocks)
+                total = response_data.get("data", {}).get("total", 0)
 
                 # 检查是否需要继续获取
                 if limit > 0 and len(all_stocks) >= limit:
                     all_stocks = all_stocks[:limit]
                     break
 
-                # 如果返回数据少于page_size，说明已经是最后一页
-                if len(stocks) < page_size:
+                if total and len(all_stocks) >= total:
                     break
 
                 page += 1
@@ -787,12 +785,13 @@ class EastMoneyDataSource(BaseDataSource):
                     break
 
                 all_etfs.extend(etfs)
+                total = response_data.get("data", {}).get("total", 0)
 
                 if limit > 0 and len(all_etfs) >= limit:
                     all_etfs = all_etfs[:limit]
                     break
 
-                if len(etfs) < page_size:
+                if total and len(all_etfs) >= total:
                     break
 
                 page += 1
@@ -846,12 +845,13 @@ class EastMoneyDataSource(BaseDataSource):
                     break
 
                 all_lofs.extend(lofs)
+                total = response_data.get("data", {}).get("total", 0)
 
                 if limit > 0 and len(all_lofs) >= limit:
                     all_lofs = all_lofs[:limit]
                     break
 
-                if len(lofs) < page_size:
+                if total and len(all_lofs) >= total:
                     break
 
                 page += 1
