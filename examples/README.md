@@ -106,6 +106,17 @@ python examples/09_future_data.py
 python examples/10_fund_data.py
 ```
 
+### 11_security_list.py
+证券列表示例，演示如何：
+- 获取A股股票列表
+- 获取ETF基金列表
+- 获取LOF基金列表
+- 批量获取证券实时行情
+
+```bash
+python examples/11_security_list.py
+```
+
 ## 运行示例
 
 ### 前提条件

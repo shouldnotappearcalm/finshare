@@ -773,7 +773,7 @@ class EastMoneyDataSource(BaseDataSource):
                     "fltt": 2,
                     "invt": 2,
                     "fid": "f3",
-                    "fs": "m:0+t:6,m:1+t:23",  # 沪深ETF
+                    "fs": "b:MK0021",  # ETF基金
                     "fields": "f1,f2,f3,f4,f5,f6,f7,f12,f13,f14,f15,f16,f17,f18",
                 }
 
@@ -832,7 +832,7 @@ class EastMoneyDataSource(BaseDataSource):
                     "fltt": 2,
                     "invt": 2,
                     "fid": "f3",
-                    "fs": "m:1+t:24",  # LOF
+                    "fs": "b:MK0023",  # LOF基金
                     "fields": "f1,f2,f3,f4,f5,f6,f7,f12,f13,f14,f15,f16,f17,f18",
                 }
 

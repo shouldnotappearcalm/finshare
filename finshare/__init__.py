@@ -427,7 +427,7 @@ def _lazy_import_list():
     """延迟导入列表模块"""
     global _get_stock_list, _get_etf_list, _get_lof_list, _get_future_list
     if _get_stock_list is None:
-        from finshare.stock.list import get_stock_list, get_etf_list, get_lof_list, get_future_list
+        from finshare.stock.security_list import get_stock_list, get_etf_list, get_lof_list, get_future_list
         _get_stock_list = get_stock_list
         _get_etf_list = get_etf_list
         _get_lof_list = get_lof_list
